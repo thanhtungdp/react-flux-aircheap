@@ -1,75 +1,101 @@
 import React,{Component} from 'react';
 import {render} from 'react-dom';
-import BankBalanceStore from './BankBalanceStore'
-import BankActions from './BankActions'
+import {Container} from 'flux/utils'
+import Autosuggest from 'react-auto-suggest';
+import AirportStore from './stores/AirportStore';
+import RouteStore from './stores/RouteStore';
+import TicketStore from './stores/TicketStore';
+import AirportActionCreators from './actions/AirportActionCreators';
+import TicketItem from './components/TicketItem';
 
 class App extends Component {
     constructor() {
         super(...arguments);
-        BankActions.createAccount();
-        this.state = {
-            balance: BankBalanceStore.getState(),
-            validate: true
-        }
     }
 
     componentDidMount() {
-        this.storeSubscription = BankBalanceStore.addListener(
-            data => this.handleStoreChange(data)
-        );
+        AirportActionCreators.fetchAirports();
     }
 
-    componentWillUnmount() {
-        this.storeSubscription.remove();
+    componentWillUpdate(nextProps, nextState) {
+        let originAndDestinationSelected = nextState.origin && nextState.destination;
+        let selectionHasChangedSinceLastUpdate = nextState.origin !== this.state.origin || nextState.destination !== this.state.destination;
+        if (selectionHasChangedSinceLastUpdate && originAndDestinationSelected) {
+            console.log('fetch tickets');
+            AirportActionCreators.fetchTickets(nextState.origin, nextState.destination);
+        }
     }
 
-    handleStoreChange() {
-        this.setState({
-            balance: BankBalanceStore.getState()
-        })
-    }
-
-    validateAmount() {
-        if (this.refs.ammount.value == 0 || this.refs.ammount.value == '') {
-            this.setState({validate: false});
-            console.log(this.state.validate);
-            return false;
+    getSuggestions(input, callback) {
+        if (input) {
+            const escapedInput = input.trim().toLowerCase();
+            const airportMatchRegex = new RegExp('\\b' + escapedInput, 'i');
+            const suggestions = this.state.airports
+                .filter((airport) => airportMatchRegex.test(airport.city))
+                .sort((airport1, airport2) => {
+                    return airport1.city.toLowerCase().indexOf(escapedInput) -
+                        airport2.city.toLowerCase().indexOf(escapedInput)
+                })
+                .slice(0, 7)
+                .map((airport)=> `${airport.city} - ${airport.country} (${airport.code})`);
+            callback(suggestions);
         }
         else {
-            this.setState({validate: true});
-            return true;
+            const suggestions = this.state.airports.slice(0, 7).map((airport)=> `${airport.city} - ${airport.country} (${airport.code})`);
+            callback(suggestions);
         }
     }
 
-    deposit() {
-        this.validateAmount();
-        BankActions.depositIntoAccount(Number(this.refs.ammount.value));
-        this.refs.ammount.value = '';
+    handleSelect(target, suggestion, event) {
+        const airportCodeRegex = /\(([^)]+)\)/;
+        let airportCode = airportCodeRegex.exec(suggestion)[1];
+        AirportActionCreators.chooseAirport(target, airportCode);
     }
 
-    withdraw() {
-        this.validateAmount();
-        BankActions.withdrawFromAccount(Number(this.refs.ammount.value));
-        this.refs.ammount.value = '';
-    }
 
     render() {
+        let ticketList = this.state.tickets.map((ticket)=>(
+            <TicketItem key={ticket.id} ticket={ticket} />
+        ));
+        console.log(this.state.tickets);
         return (
             <div>
-                <header>FluxTrust Bank</header>
-                <h1>Your balance is ${(this.state.balance).toFixed(2)}</h1>
-                <div className="atm">
-                    <input type="text" placeholder="Enter Ammount" ref="ammount"/>
-                    {!this.state.validate ? (
-                        <p>Amount muse be > 0</p>
-                    ) : ''}
-                    <br/>
-                    <button onClick={this.withdraw.bind(this)}>Withdraw</button>
-                    <button onClick={this.deposit.bind(this)}>Deposit</button>
+                <header>
+                    <div className="header-brand">
+                        <img src="logo.png" height="35"/>
+                        <p>Check discount ticket prices and pay using your Aircheap points</p>
+                    </div>
+                    <div className="header-route">
+                        <Autosuggest
+                            id="from"
+                            suggestions={this.getSuggestions.bind(this)}
+                            onSuggestion={this.handleSelect.bind(this,'origin')}
+                            value={this.state.origin}
+                            inputAttributes={{placeholder:'From'}}/>
+                        <Autosuggest
+                            id="to"
+                            suggestions={this.getSuggestions.bind(this)}
+                            onSuggestion={this.handleSelect.bind(this,'destination')}
+                            value={this.state.origin}
+                            inputAttributes={{placeholder:'To'}}/>
+                    </div>
+                </header>
+                <div>
+                    {ticketList}
                 </div>
             </div>
         )
     }
 }
 
-render(<App/>, document.getElementById('root'))
+App.getStores = ()=>([AirportStore, RouteStore, TicketStore]);
+App.calculateState = (prevState)=>({
+    airports: AirportStore.getState(),
+    origin: RouteStore.get('origin'),
+    destination: RouteStore.get('destination'),
+    tickets: TicketStore.getState()
+});
+
+let AppContainer = Container.create(App);
+
+render(<AppContainer/>, document.getElementById('root'))
